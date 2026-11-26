@@ -8,7 +8,8 @@ CREATE TABLE IF NOT EXISTS apps (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   name TEXT NOT NULL UNIQUE,
   owner TEXT NOT NULL DEFAULT '',
-  status TEXT NOT NULL DEFAULT '启用' CHECK(status IN ('启用','停用'))
+  status TEXT NOT NULL DEFAULT '启用',
+  retired_at TEXT
 );
 CREATE TABLE IF NOT EXISTS environments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -38,6 +39,8 @@ CREATE TABLE IF NOT EXISTS releases (
   current_env_id INTEGER,
   canary_ratio INTEGER NOT NULL DEFAULT 10,
   note TEXT NOT NULL DEFAULT '',
+  frozen INTEGER NOT NULL DEFAULT 0,
+  frozen_at TEXT,
   created_at TEXT NOT NULL,
   admitted_at TEXT,
   released_at TEXT,
@@ -97,6 +100,7 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TEXT NOT NULL,
   note TEXT NOT NULL DEFAULT ''
 );
+CREATE INDEX IF NOT EXISTS idx_releases_app_status ON releases(app_id, status);
 """
 
 RELEASE_STATUSES = ("待入闸", "已入闸", "晋升中", "已放行", "回滚中", "已回滚", "已关闭")
@@ -107,9 +111,10 @@ WINDOW_STATUSES = ("窗开", "窗关")
 
 def connect() -> sqlite3.Connection:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=8.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA busy_timeout=8000")
     return conn
 
 
@@ -126,9 +131,101 @@ def db():
         conn.close()
 
 
+@contextmanager
+def write_txn():
+    """Serializing write transaction for fate-sensitive writes.
+
+    ``BEGIN IMMEDIATE`` takes the SQLite write lock up-front, so a retirement
+    transaction and a promotion/release transaction can never interleave their
+    reads and writes ("各写各的").  ``busy_timeout`` makes contenders wait.
+    """
+    conn = connect()
+    conn.isolation_level = None
+    try:
+        conn.execute("BEGIN IMMEDIATE")
+        yield conn
+        conn.execute("COMMIT")
+    except Exception:
+        try:
+            conn.execute("ROLLBACK")
+        except sqlite3.Error:
+            pass
+        raise
+    finally:
+        conn.close()
+
+
+def _table_columns(conn, table: str) -> set[str]:
+    return {r["name"] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """Bring older snapshot databases forward without losing rows.
+
+    The apps status CHECK in the initial snapshot only allows 启用/停用, which
+    would block persisting 退役 (and block fixtures that dirty the row). Rebuild
+    the table without a status enum; the service layer owns the rule and fails
+    closed on unknown dirty values.
+    """
+    app_cols = _table_columns(conn, "apps")
+    app_sql_row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='apps'"
+    ).fetchone()
+    app_sql = (app_sql_row[0] if app_sql_row else "") or ""
+    app_sql_compact = "".join(app_sql.split())
+    has_old_status_check = "statusIN('启用','停用')" in app_sql_compact
+    if has_old_status_check:
+        # Old CHECK-constrained table (or any shape missing 退役): rebuild.
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute("BEGIN IMMEDIATE")
+        retired_expr = "retired_at" if "retired_at" in app_cols else "NULL"
+        try:
+            conn.execute(
+                """
+                CREATE TABLE apps__retire_mig (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  name TEXT NOT NULL UNIQUE,
+                  owner TEXT NOT NULL DEFAULT '',
+                  status TEXT NOT NULL DEFAULT '启用',
+                  retired_at TEXT
+                )
+                """
+            )
+            conn.execute(
+                f"""
+                INSERT INTO apps__retire_mig(id, name, owner, status, retired_at)
+                SELECT id, name, owner, status, {retired_expr} FROM apps
+                """
+            )
+            conn.execute("DROP TABLE apps")
+            conn.execute("ALTER TABLE apps__retire_mig RENAME TO apps")
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+        finally:
+            conn.execute("PRAGMA foreign_keys=ON")
+    elif "retired_at" not in app_cols:
+        conn.execute("ALTER TABLE apps ADD COLUMN retired_at TEXT")
+
+    rel_cols = _table_columns(conn, "releases")
+    if "frozen" not in rel_cols:
+        conn.execute("ALTER TABLE releases ADD COLUMN frozen INTEGER NOT NULL DEFAULT 0")
+    if "frozen_at" not in rel_cols:
+        conn.execute("ALTER TABLE releases ADD COLUMN frozen_at TEXT")
+
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_releases_app_status ON releases(app_id, status)")
+
+
 def init_db() -> None:
-    with db() as conn:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = connect()
+    try:
         conn.executescript(SCHEMA)
+        _migrate(conn)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def row_to_dict(row: sqlite3.Row | None) -> dict | None:

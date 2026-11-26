@@ -4,6 +4,7 @@ import Overview from './pages/Overview'
 import Apps from './pages/Apps'
 import Releases from './pages/Releases'
 import Promote from './pages/Promote'
+import ReleaseGate from './pages/ReleaseGate'
 import Windows from './pages/Windows'
 import Rollback from './pages/Rollback'
 import Health from './pages/Health'
@@ -16,6 +17,7 @@ const links = [
   ['/应用', '应用'],
   ['/发版单', '发版单'],
   ['/晋升', '晋升'],
+  ['/放行', '放行'],
   ['/窗口', '窗口'],
   ['/回滚', '回滚'],
   ['/健康', '健康'],
@@ -46,6 +48,7 @@ export default function App() {
           <Route path="/应用" element={<Apps />} />
           <Route path="/发版单" element={<Releases />} />
           <Route path="/晋升" element={<Promote />} />
+          <Route path="/放行" element={<ReleaseGate />} />
           <Route path="/窗口" element={<Windows />} />
           <Route path="/回滚" element={<Rollback />} />
           <Route path="/健康" element={<Health />} />

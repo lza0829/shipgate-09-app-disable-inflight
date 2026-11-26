@@ -245,3 +245,63 @@ tr:hover td { background: #f2f4f7; }
   }
   .nav { flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ---- 退役 / 冻结 / 只读：全站唯一呈现套 ---- */
+.badge {
+  display: inline-block;
+  padding: 0.12rem 0.5rem;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  border: 1px solid var(--steel);
+  border-radius: 2px;
+  white-space: nowrap;
+  line-height: 1.5;
+}
+.badge-open { color: var(--ok); border-color: var(--ok); background: #e9f6f1; }
+.badge-suspended { color: #8a6d1d; border-color: #c39a2e; background: #fbf3da; }
+.badge-retired { color: #fff; border-color: #14171c; background: #3a3f47; }
+.badge-frozen {
+  color: #1d4e89;
+  border-color: #1d4e89;
+  background: #e7f0fb;
+  position: relative;
+}
+.badge-frozen::before { content: "❄ "; }
+
+tr.row-frozen td, tr.row-retired td { background: #f1f6fc; }
+tr.row-frozen:hover td, tr.row-retired:hover td { background: #e6effa; }
+tr.row-retired td { color: var(--muted); }
+
+.stat.frozen-stat { border-bottom-color: #1d4e89; }
+.stat.frozen-stat .n { color: #1d4e89; }
+
+.fate-banner {
+  border-left: 4px solid #1d4e89;
+  background: #e7f0fb;
+  color: #163d6b;
+  padding: 0.6rem 0.8rem;
+  margin: 0.6rem 0;
+  font-size: 0.9rem;
+}
+.ok { color: var(--ok); white-space: pre-wrap; font-weight: 500; }
+
+/* 视觉只读、但保留点击探针（不用原生 disabled 拦截“退役后再点”） */
+button.is-locked {
+  background: #8a94a3;
+  border-color: #6b7686;
+  color: #f2f4f7;
+  border-style: dashed;
+  cursor: not-allowed;
+  opacity: 0.85;
+}
+button.is-locked:hover { background: #788393; transform: none; }
+
+.mouth-cell, .action-cell { white-space: nowrap; }
+.mouth-all-closed { color: #1d4e89; font-size: 0.82rem; font-weight: 700; }
+
+.retire-btn { min-width: 4.2rem; }
+
+@media (max-width: 860px) {
+  .mouth-cell, .action-cell { white-space: normal; }
+}

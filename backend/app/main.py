@@ -16,8 +16,11 @@ from app.routers import (
     windows,
 )
 from app.seed import seed_if_empty
+from app.services.common import sweep_all_retirement
 
 seed_if_empty()
+# 规则重放：重启后把任何半截“脏退役”（状态已退役但冻结留痕缺失）对齐到同一命运。
+sweep_all_retirement()
 
 app = FastAPI(title=PROJECT_NAME)
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
